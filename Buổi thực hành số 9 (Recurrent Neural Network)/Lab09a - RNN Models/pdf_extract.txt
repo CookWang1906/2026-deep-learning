@@ -1,0 +1,1163 @@
+=== PAGE 1 ===
+27
+LSTM for Time Series Prediction
+in PyTorch
+LongShort-TermMemory(LSTM)isastructurethatcanbeusedinneuralnetwork. Itisa
+typeofrecurrentneuralnetwork(RNN)thatexpectstheinputintheformofasequenceof
+features. Itisusefulfordatasuchastimeseriesorstringoftext. Inthischapter,youwill
+learnaboutLSTMnetworks. Inparticular,
+⊲ WhatisLSTMandhowtheyaredifferent
+⊲ HowtodevelopLSTMnetworkfortimeseriesprediction
+⊲ HowtotrainaLSTMnetwork
+Let’sgetstarted.
+Overview
+Thischapterisdividedintothreeparts;theyare
+⊲ OverviewofLSTMNetwork
+⊲ LSTMforTimeSeriesPrediction
+⊲ TrainingandVerifyingYourLSTMNetwork
+27.1 Overview of LSTM Network
+LSTM cell is a building block that you can use to build a larger neural network. While
+thecommonbuildingblocksuchasfully-connectedlayeraremerelymatrixmultiplicationof
+theweighttensorandtheinputtoproduceanoutputtensor,LSTMmoduleismuchmore
+complex.
+AtypicalLSTMcellisillustratedasfollows
+=== PAGE 2 ===
+27.1 Overview of LSTM Network 277
+σf σi tanh σo
+× +
+× ×
+tanh
+ct−1
+Cellstate
+ht−1
+Hiddenstate
+xtInput
+ct
+Cellstate
+ht
+Hiddenstate
+htOutput
+Figure 27.1: LSTM cell
+Ittakesonetimestepofaninputtensor xaswellasacellmemory candahiddenstate
+h. Thecellmemoryandhiddenstatecanbeinitializedtozeroatthebeginning. Thenwithin
+theLSTMcell, x, c, andhwillbemultipliedbyseparateweighttensorsandpassthrough
+some activation functions a few times. The result is the updated cell memory and hidden
+state. Theseupdated cand hwillbeusedonthe next time step oftheinputtensor. Until
+theendofthelasttimestep,theoutputoftheLSTMcellwillbeitscellmemoryandhidden
+state.
+Specifically,theequationofoneLSTMcellisasfollows:
+ft = σf (Wf xt + Uf ht−1 + bf )
+it = σi(Wixt + Uiht−1 + bi)
+ot = σo(Woxt + Uoht−1 + bo)
+˜ct = σc(Wcxt + Ucht−1 + bc)
+ct = ft ⊗ ct−1 + it ⊗ ˜ct
+ht = ot ⊗ σh(ct)
+Where W, U, baretrainableparametersoftheLSTMcell. Eachequationaboveiscomputed
+foreachtimestep,hencewithsubscript t. Thesetrainableparametersare reusedforallthe
+timesteps. ThisnatureofsharedparameterbringthememorypowertotheLSTM.
+NotethattheaboveisonlyonedesignoftheLSTM.Therearemultiplevariationsinthe
+literature.
+SincetheLSTMcellexpectstheinput xintheformofmultipletimesteps,eachinput
+sampleshouldbea2Dtensors: Onedimensionfortimeandanotherdimensionforfeatures.
+ThepowerofanLSTMcelldependsonthesizeofthehiddenstateorcellmemory,which
+usuallyhasalargerdimensionthanthenumberoffeaturesintheinput.
+=== PAGE 3 ===
+27.2 LSTM for Time Series Prediction 278
+27.2 LSTM for Time Series Prediction
+Let’s see how LSTM can be used to build a time series prediction neural network with an
+example.
+The problem you will look at in this chapter is the international airline passengers
+prediction problem. This is a problem where, given a year and a month, the task is to
+predictthenumberofinternationalairlinepassengersinunitsof1,000. Thedatarangesfrom
+January1949toDecember1960,or12years,with144observations.
+Itisaregressionproblem. Thatis,giventhenumberofpassengers(inunitof1,000)the
+recentmonths,whatisthenumberofpassengersthenextmonth. Thedatasethasonlyone
+feature: Thenumberofpassengers.
+Let’sstartbyreadingthedata. Thedatacanbedownloadedhere.
+⊲ https://raw.githubusercontent.com/jbrownlee/Dataset s/master/airline-passenger
+s.csv
+Savethisfileas airline-passengers.csvinthelocaldirectoryforthefollowing. Belowisa
+sampleofthefirstfewlinesofthefile:
+Output 27.1: The time series dataset in the CSV file
+"Month","Passengers"
+"1949-01",112
+"1949-02",118
+"1949-03",132
+"1949-04",129
+The data has two columns, the month and the number of passengers. Since the data are
+arrangedinchronologicalorder,youcantakeonlythenumberofpassengertomakeasingle-
+featuretimeseries. BelowyouwillusepandaslibrarytoreadtheCSVfileandconvertitinto
+a2DNumPyarray,thenplotitusingmatplotlib:
+Listing 27.1: Extracting and plotting the time series
+import matplotlib.pyplot as plt
+import pandas as pd
+df = pd.read_csv('airline-passengers.csv')
+timeseries = df[["Passengers"]].values.astype('float32')
+plt.plot(timeseries)
+plt.show()
+=== PAGE 4 ===
+27.2 LSTM for Time Series Prediction 279
+Figure 27.2: Time series as plotted
+Thistimeserieshas144timesteps. Youcanseefromtheplotthatthereisanupward
+trend. Therearealsosomeperiodicityinthedatasetthatcorrespondstothesummerholiday
+periodinthenorthernhemisphere. Usuallyatimeseriesshouldbe“detrended”toremovethe
+lineartrendcomponentandnormalizedbeforeprocessing. Forsimplicity,theseareskipped
+inthisproject.
+Todemonstratethepredictivepowerofourmodel,thetimeseriesissplittedintotraining
+andtestsets. Unlikeotherdataset, usuallytimeseriesdataare splittedwithoutshuffling.
+Thatis,thetrainingsetisthefirsthalfoftimeseriesandtheremainingwillbeusedasthe
+testset. ThiscanbeeasilydoneonaNumPyarray:
+Listing 27.2: Train-test split of the time series dataset
+# train-test split for time series
+train_size = int(len(timeseries) * 0.67 )
+test_size = len(timeseries) - train_size
+train, test = timeseries[:train_size], timeseries[train_size:]
+Themorecomplicatedproblemishowdoyouwantthenetworktopredictthetimeseries.
+Usuallytimeseriespredictionisdoneonawindow. Thatis,givendatafromtime t − wto
+time t,youareaskedtopredictfortime t + 1(ordeeperintothefuture). Thesizeofwindow
+wgovernshowmuchdatayouareallowedtolookatwhenyoumaketheprediction. Thisis
+alsocalledthe look back period.
+Onalongenoughtimeseries,multipleoverlappingwindowcanbecreated. Itisconvenient
+tocreateafunctiontogenerateadatasetoffixedwindowfromatimeseries. Sincethedata
+isgoingtobeusedinaPyTorchmodel,theoutputdatasetshouldbeinPyTorchtensors:
+=== PAGE 5 ===
+27.2 LSTM for Time Series Prediction 280
+Listing 27.3: Transforming a time series dataset
+import torch
+def create_dataset(dataset, lookback):
+"""Transform a time series into a prediction dataset
+Args:
+dataset: A numpy array of time series, first dimension is the time steps
+lookback: Size of window for prediction
+"""
+X, y = [], []
+for i in range(len(dataset)-lookback):
+feature = dataset[i:i+lookback]
+target = dataset[i+1:i+lookback+1]
+X.append(feature)
+y.append(target)
+return torch.tensor(X), torch .tensor(y)
+Thisfunctionisdesignedtoapplywindowsonthetimeseries. Itisassumedtopredictforone
+timestepintotheimmediatefuture. Itisdesignedtoconvertatimeseriesintoatensorof
+dimensions(windowsample,timesteps,features). Atimeseriesof Ltimestepscanproduce
+roughly Lwindows(becauseawindowcanstartfromanytimestepaslongasthewindow
+doesnotgobeyondtheboundaryofthetimeseries). Withinonewindow,therearemultiple
+consecutivetimestepsofvalues. Ineachtimestep,therecanbemultiplefeatures. Inthis
+dataset,thereisonlyone.
+Itisintentionaltoproducethe featureandthe targetthesameshape: Forawindowof
+threetimesteps,thefeatureisthetimeseriesfrom tto t + 2andthetargetisfrom t + 1to
+t + 3. Whatweareinterestedis t + 3buttheinformationof t + 1to t + 2isusefulintraining.
+Notethattheinputtimeseriesisa2Darrayandtheoutputfromthe create_dataset()
+function will be a 3D tensor. Let’s try withlookback=1. You can verify the shape of the
+outputtensorasfollows:
+Listing 27.4: Creating dataset tensor for training
+lookback = 1
+X_train, y_train = create_dataset(train, lookback = lookback)
+X_test, y_test = create_dataset(test, lookback = lookback)
+print(X_train.shape, y_train .shape)
+print(X_test.shape, y_test .shape)
+whichyoushouldsee:
+Output 27.2: Shapes of tensors of the training and test set
+torch.Size([95, 1, 1]) torch.Size([95, 1, 1])
+torch.Size([47, 1, 1]) torch.Size([47, 1, 1])
+NowyoucanbuildtheLSTMmodeltopredictthetimeseries. With lookback=1,itisquite
+surelythattheaccuracywouldnotbegoodfortoolittlecluestopredict. Butthisisagood
+exampletodemonstratethestructureoftheLSTMmodel.
+=== PAGE 6 ===
+27.3 Training and Verifying Your LSTM Network 281
+Themodeliscreatedasaclass, inwhichaLSTMlayerandafully-connectedlayeris
+used.
+Listing 27.5: LSTM model
+...
+import torch.nn as nn
+class AirModel(nn.Module):
+def __init__(self):
+super().__init__()
+self.lstm = nn.LSTM(input_size=1 , hidden_size =50 , num_layers =1 , batch_first = True)
+self.linear = nn.Linear(50, 1)
+def forward(self, x):
+x, _ = self.lstm(x)
+x = self.linear(x)
+return x
+The output ofnn.LSTM() is a tuple. The first element is the generated hidden states, one
+foreachtimestepoftheinput. ThesecondelementistheLSTMcell’smemoryandhidden
+states,whichisnotusedhere.
+TheLSTMlayeriscreatedwithoption batch_first=True becausethetensorsyouprepared
+isinthedimensionof(windowsample,timesteps,features)andwhereabatchiscreatedby
+samplingonthefirstdimension.
+Theoutputofhiddenstatesisfurtherprocessedbyafully-connectedlayertoproduce
+asingleregressionresult. SincetheoutputfromLSTMisonepereachinputtimestep,you
+canchoosetopickonlythelasttimestep’soutput,whichyoushouldhave:
+Listing 27.6: Modifying forward() to output only the next-step prediction
+x, _ = self.lstm(x)
+# extract only the last time step
+x = x[:, -1, :]
+x = self.linear(x)
+and the model’s output will be the prediction of the next time step. But here, the fully
+connectedlayerisappliedtoeachtimestep. Inthisdesign,youshouldextractonlythelast
+timestepfromthemodeloutputasyourprediction. However,inthiscase,thewindowis1,
+thereisnodifferenceinthesetwoapproaches.
+27.3 Training and Verifying Your LSTM Network
+Becauseitisaregressionproblem,MSEischosenasthelossfunction,whichistobeminimized
+byAdamoptimizer. Inthecodebelow,thePyTorchtensorsarecombinedintoadatasetusing
+torch.utils.data.TensorDataset()andbatchfortrainingisprovidedbya DataLoader. The
+modelperformanceisevaluatedonceper100epochs,onboththetrainingsetandthetest
+set:
+=== PAGE 7 ===
+27.3 Training and Verifying Your LSTM Network 282
+Listing 27.7: Training a LSTM network
+import numpy as np
+import torch.optim as optim
+import torch.utils.data as data
+model = AirModel()
+optimizer = optim.Adam(model.parameters())
+loss_fn = nn.MSELoss()
+loader = data.DataLoader(data.TensorDataset(X_train, y_train), shuffle = True, batch_size =8 )
+n_epochs = 2000
+for epoch in range(n_epochs):
+model.train()
+for X_batch, y_batch in loader:
+y_pred = model(X_batch)
+loss = loss_fn(y_pred, y_batch)
+optimizer.zero_grad()
+loss.backward()
+optimizer.step()
+# Validation
+if epoch % 100 != 0 :
+continue
+model.eval()
+with torch.no_grad():
+y_pred = model(X_train)
+train_rmse = np.sqrt(loss_fn(y_pred, y_train))
+y_pred = model(X_test)
+test_rmse = np.sqrt(loss_fn(y_pred, y_test))
+print("Epoch %d: train RMSE %.4f, test RMSE %.4f" % (epoch, train_rmse, test_rmse))
+Asthedatasetissmall,themodelshouldbetrainedforlongenoughtolearnaboutthepattern.
+Overthese2000epochstrained,youshouldseetheRMSEonbothtrainingsetandtestset
+decreasing:
+Epoch 0: train RMSE 225.7571, test RMSE 422.1521
+Epoch 100: train RMSE 186.7353, test RMSE 381.3285
+Epoch 200: train RMSE 153.3157, test RMSE 345.3290
+Epoch 300: train RMSE 124.7137, test RMSE 312.8820
+Epoch 400: train RMSE 101.3789, test RMSE 283.7040
+Epoch 500: train RMSE 83.0900, test RMSE 257.5325
+Epoch 600: train RMSE 66.6143, test RMSE 232.3288
+Epoch 700: train RMSE 53.8428, test RMSE 209.1579
+Epoch 800: train RMSE 44.4156, test RMSE 188.3802
+Epoch 900: train RMSE 37.1839, test RMSE 170.3186
+Epoch 1000: train RMSE 32.0921, test RMSE 154.4092
+Epoch 1100: train RMSE 29.0402, test RMSE 141.6920
+Epoch 1200: train RMSE 26.9721, test RMSE 131.0108
+Epoch 1300: train RMSE 25.7398, test RMSE 123.2518
+Epoch 1400: train RMSE 24.8011, test RMSE 116.7029
+Epoch 1500: train RMSE 24.7705, test RMSE 112.1551
+Epoch 1600: train RMSE 24.4654, test RMSE 108.1879
+Epoch 1700: train RMSE 25.1378, test RMSE 105.8224
+=== PAGE 8 ===
+27.3 Training and Verifying Your LSTM Network 283
+Output 27.3: Training progress
+Epoch 1800: train RMSE 24.1940, test RMSE 101.4219
+Epoch 1900: train RMSE 23.4605, test RMSE 100.1780
+ItisexpectedtoseetheRMSEoftestsetisanorderofmagnitudelarger. TheRMSEof
+100meansthepredictionandtheactualtargetwouldbeinaverageoffby100invalue(i.e.,
+100,000passengersinthisdataset).
+To better understand the prediction quality, you can indeed plot the output using
+matplotlib,asfollows:
+Listing 27.8: Plotting the predicted time series
+with torch.no_grad():
+# shift train predictions for plotting
+train_plot = np.ones_like(timeseries) * np.nan
+y_pred = model(X_train)
+y_pred = y_pred[:, -1, :]
+train_plot[lookback:train_size] = model(X_train)[:, -1, :]
+# shift test predictions for plotting
+test_plot = np.ones_like(timeseries) * np.nan
+test_plot[train_size+lookback:len(timeseries)] = model(X_test)[:, -1, :]
+# plot
+plt.plot(timeseries, c = 'b')
+plt.plot(train_plot, c = 'r')
+plt.plot(test_plot, c = 'g')
+plt.show()
+Figure 27.3: Predicted time series
+Fromtheabove,youtakethemodel’soutputas y_predbutextractonlythedatafrom
+thelasttimestepas y_pred[:, -1, :] . Thisiswhatisplottedonthechart.
+=== PAGE 9 ===
+27.3 Training and Verifying Your LSTM Network 284
+Thetrainingsetisplottedinredwhilethetestsetisplottedingreen. Thebluecurve
+iswhattheactualdatalookslike. Youcanseethatthemodelcanfitwelltothetrainingset
+butnotverywellonthetestset.
+Tyingtogether, belowisthecompletecode, excepttheparameter lookbackissetto4
+thistime:
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import torch.utils.data as data
+df = pd.read_csv('airline-passengers.csv')
+timeseries = df[["Passengers"]].values.astype('float32')
+# train-test split for time series
+train_size = int(len(timeseries) * 0.67 )
+test_size = len(timeseries) - train_size
+train, test = timeseries[:train_size], timeseries[train_size:]
+def create_dataset(dataset, lookback):
+"""Transform a time series into a prediction dataset
+Args:
+dataset: A numpy array of time series, first dimension is the time steps
+lookback: Size of window for prediction
+"""
+X, y = [], []
+for i in range(len(dataset)-lookback):
+feature = dataset[i:i+lookback]
+target = dataset[i+1:i+lookback+1]
+X.append(feature)
+y.append(target)
+return torch.tensor(X), torch .tensor(y)
+lookback = 4
+X_train, y_train = create_dataset(train, lookback = lookback)
+X_test, y_test = create_dataset(test, lookback = lookback)
+class AirModel(nn.Module):
+def __init__(self):
+super().__init__()
+self.lstm = nn.LSTM(input_size=1 , hidden_size =50 , num_layers =1 , batch_first = True)
+self.linear = nn.Linear(50, 1)
+def forward(self, x):
+x, _ = self.lstm(x)
+x = self.linear(x)
+return x
+model = AirModel()
+=== PAGE 10 ===
+27.3 Training and Verifying Your LSTM Network 285
+Listing 27.9: Training a LSTM model to predict time series with 4-step lookback
+optimizer = optim.Adam(model.parameters())
+loss_fn = nn.MSELoss()
+loader = data.DataLoader(data.TensorDataset(X_train, y_train), shuffle = True, batch_size =8 )
+n_epochs = 2000
+for epoch in range(n_epochs):
+model.train()
+for X_batch, y_batch in loader:
+y_pred = model(X_batch)
+loss = loss_fn(y_pred, y_batch)
+optimizer.zero_grad()
+loss.backward()
+optimizer.step()
+# Validation
+if epoch % 100 != 0 :
+continue
+model.eval()
+with torch.no_grad():
+y_pred = model(X_train)
+train_rmse = np.sqrt(loss_fn(y_pred, y_train))
+y_pred = model(X_test)
+test_rmse = np.sqrt(loss_fn(y_pred, y_test))
+print("Epoch %d: train RMSE %.4f, test RMSE %.4f" % (epoch, train_rmse, test_rmse))
+with torch.no_grad():
+# shift train predictions for plotting
+train_plot = np.ones_like(timeseries) * np.nan
+y_pred = model(X_train)
+y_pred = y_pred[:, -1, :]
+train_plot[lookback:train_size] = model(X_train)[:, -1, :]
+# shift test predictions for plotting
+test_plot = np.ones_like(timeseries) * np.nan
+test_plot[train_size+lookback:len(timeseries)] = model(X_test)[:, -1, :]
+# plot
+plt.plot(timeseries)
+plt.plot(train_plot, c = 'r')
+plt.plot(test_plot, c = 'g')
+plt.show()
+Runningtheabovecodewillproducetheplotbelow. FromboththeRMSEmeasureprinted
+andtheplot,youcannoticethatthemodelcannowdobetteronthetestset.
+=== PAGE 11 ===
+27.4 Further Readings 286
+Figure 27.4: Time series prediction using LSTM network
+Thisisalsowhythe create_dataset()functionisdesignedinsuchway: Whenthemodelis
+givenatimeseriesoftime tto t + 3(as lookback=4),itsoutputisthepredictionof t + 1to t + 4.
+However, t + 1to t + 3arealsoknownfromtheinput. Byusingtheseinthelossfunction,the
+modeleffectivelywasprovidedwithmorecluestotrain. Thisdesignisnotalwayssuitable,
+butyoucanseeitishelpfulinthisparticularexample.
+27.4 Further Readings
+Thissectionprovidesmoreresourcesonthetopicifyouarelookingtogodeeper.
+LSTM.PyTorchAPI.
+https://pytorch.org/docs/stable/generated/torch.nn.LSTM.html
+torch.utils.data.PyTorchdocumentation.
+https://pytorch.org/docs/stable/data.html
+27.5 Summary
+Inthischapter,youdiscoveredwhatisLSTMandhowtouseitfortimeseriespredictionin
+PyTorch. Specifically,youlearned:
+⊲ Whatistheinternationalairlinepassengertimeseriespredictiondataset
+⊲ WhatisaLSTMcell
+⊲ HowtocreateanLSTMnetworkfortimeseriesprediction
+Inthenextchapter,youwillseealargerexampleinLSTM.
+=== PAGE 12 ===
+28
+Text Generation with LSTM in
+PyTorch
+Recurrentneuralnetworkcanbeusedfortimeseriesprediction. Inwhich,aregressionneural
+networkiscreated. Itcanalsobeusedasgenerativemodel,whichusuallyisaclassification
+neuralnetworkmodel. Agenerativemodelistolearncertainpatternfromdata,suchthat
+whenitispresentedwithsomeprompt,itcancreateacompleteoutputthatinthesamestyle
+asthelearnedpattern.
+Inthischapter,youwilldiscoverhowtobuildagenerativemodelfortextusingLSTM
+recurrentneuralnetworksinPyTorch. Afterfinishingthischapter,youwillknow:
+⊲ Where to download a free corpus of text that you can use to train text generative
+models
+⊲ Howtoframetheproblemoftextsequencestoarecurrentneuralnetworkgenerative
+model
+⊲ HowtodevelopanLSTMtogenerateplausibletextsequencesforagivenproblem
+Let’sgetstarted.
+Overview
+Thischapterisdividedintosixparts;theyare:
+⊲ WhatisaGenerativeModel
+⊲ GettingTextData
+⊲ ASmallLSTMNetworktoPredittheNextCharacter
+⊲ GeneratingTextwithanLSTMModel
+⊲ UsingaLargerLSTMNetwork
+⊲ FasterTrainingwithGPU
+=== PAGE 13 ===
+28.1 What is a Generative Model 288
+28.1 What is a Generative Model
+Generativemodelisindeed,justanothermachinelearningmodelthathappenedtobeableto
+createnewthings. GenerativeAdverserialNetwork(GAN)isaclassofitsown. Transformer
+modelsthatusesattentionmechanismisalsofoundtobeusefultogeneratetextpassages.
+It is just a machine learning model because the model has been trained with existing
+data,sothatitlearnedsomethingfromit. Dependsonhowtotrainit,theycanworkvastly
+different. Inthischapter,acharacter-basedgenerativemodeliscreated. Whatitmeansis
+totrainamodelthattakeasequenceofcharacters(alphabetsandpunctuations)asinput
+andtheimmediatenextcharacterasthetarget. Aslongasitcanpredictwhatisthenext
+charactergivenwhatarepreceding,youcanrunthemodelinalooptogeneratealongpiece
+oftext.
+This model is probably the simplest one. However, human language is complex. You
+shouldn’texpectitcanproduceveryhighqualityoutput. Evenso, youneedalotofdata
+andtrainthemodelforalongtimebeforeyoucanseesensibleresults.
+28.2 Getting Text Data
+Obtaininghighqualitydataisimportantforasuccessfulgenerativemodel. Fortunately,many
+oftheclassicaltextsarenolongerprotectedundercopyright. Thismeansyoucandownload
+all the text for these books for free and use them in experiments, like creating generative
+models. Perhapsthebestplacetogetaccesstofreebooksthatarenolongerprotectedby
+copyrightisProjectGutenberg.
+In this chapter, you will use a favorite book from childhood as the dataset, Alice’s
+AdventuresinWonderlandbyLewisCarroll:
+⊲ https://www.gutenberg.org/ebooks/11
+Yourmodelwilllearnthedependenciesbetweencharactersandtheconditionalprobabilities
+ofcharactersinsequencessothatyoucan,inturn,generatewhollynewandoriginalsequences
+ofcharacters. Thischapterisalotoffun,andrepeatingtheseexperimentswithotherbooks
+fromProjectGutenbergisrecommended. Theseexperimentsarenotlimitedtotext;youcan
+alsoexperimentwithotherASCIIdata,suchascomputersourcecode,marked-updocuments
+inLATEX,HTMLorMarkdown,andmore.
+YoucandownloadthecompletetextinASCIIformat(PlaintextUTF-8)forthisbook
+forfreeandplaceitinyourworkingdirectorywiththefilename wonderland.txt. Now,you
+needtopreparethedatasetreadyformodeling. ProjectGutenbergaddsastandardheader
+andfootertoeachbook,whichisnotpartoftheoriginaltext. Openthefileinatexteditor
+anddeletetheheaderandfooter. Theheaderisobviousandendswiththetext:
+Output 28.1: Header of the text file
+*** START OF THIS PROJECT GUTENBERG EBOOK ALICE'S ADVENTURES IN WONDERLAND ***
+Thefooterisallthetextafterthelineoftextthatsays:
+=== PAGE 14 ===
+28.3 A Small LSTM Network to Predict the Next Character 289
+Output 28.2: Footer of the text file
+THE END
+Youshouldbeleftwithatextfilethathasabout3,400linesoftext.
+28.3 A Small LSTM Network to Predict the Next Character
+First,youneedtodosomepreprocessingonthedatabeforeyoucanbuildamodel. Neural
+network models can only work with numbers, not text. Therefore you need to transform
+thecharactersintonumbers. Tomaketheproblemsimpler,youalsowanttotransformall
+uppercaselettersintolowercase.
+Inbelow,youopenthetextfile,transformalllettersintolowercase,andcreateaPython
+dict char_to_int to map characters into distinct integers. For example, the list of unique
+sortedlowercasecharactersinthebookisasfollows:
+Listing 28.1: List of unique character tokens
+['\n', '\r', ' ' , '!', '"', "'", '(', ')', '*', ',', '-', '.', ':', ';', '?', '[', ']',
+'_', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p',
+'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', '\xbb', '\xbf', '\xef']
+Sincethisproblemischaracter-based,the“vocabulary”arethedistinctcharacterseverused
+inthetext.
+Listing 28.2: Counting the vocabulary in the text file
+# load ascii text and covert to lowercase
+filename = "wonderland.txt"
+raw_text = open(filename, 'r', encoding = 'utf-8').read()
+raw_text = raw_text.lower()
+# create mapping of unique chars to integers
+chars = sorted(list(set(raw_text)))
+char_to_int = dict((c, i) for i, c in enumerate(chars))
+# summarize the loaded data
+n_chars = len(raw_text)
+n_vocab = len(chars)
+print("Total Characters: " , n_chars)
+print("Total Vocab: " , n_vocab)
+Thisshouldprint:
+Output 28.3: Number of characters and vocabulary in the text file
+Total Characters: 144343
+Total Vocab: 44
+Youcanseethebookhasjustunder150,000characters,andwhenconvertedtolowercase,
+thereareonly44distinctcharactersinthevocabularyforthenetworktolearn—muchmore
+thanthe26inthealphabet.
+=== PAGE 15 ===
+28.3 A Small LSTM Network to Predict the Next Character 290
+Next,youneedtoseparatethetextintoinputsandtargets. Awindowof100character
+isusedhere. Thatis, withcharacter1to100asinput, yourmodelisgoingtopredictfor
+character 101. Should a window of 5 be used, the word “chapter” will become two data
+samples:
+Output 28.4: Input and prediction example
+chapt -> e
+hapte -> r
+In a long text such as this one, a myriad of windows can be created and this produced a
+datasetofalotofsamples:
+Listing 28.3: Creating a dataset from a long text using a sliding window
+# prepare the dataset of input to output pairs encoded as integers
+seq_length = 100
+dataX = []
+dataY = []
+for i in range(0, n_chars - seq_length, 1):
+seq_in = raw_text[i:i + seq_length]
+seq_out = raw_text[i + seq_length]
+dataX.append([char_to_int[char] for char in seq_in])
+dataY.append(char_to_int[seq_out])
+n_patterns = len(dataX)
+print("Total Patterns: " , n_patterns)
+Runningtheabove,youcanseeatotalof144,243samplesarecreated. Eachsampleisnow
+in the form of integers, transformed using the mappingchar_to_int. However, a PyTorch
+modelwouldprefertoseethedatainfloatingpointtensors. Henceyoushouldconvertthese
+intoPyTorchtensors. LSTMlayerisgoingtobeusedinthemodel, thustheinputtensor
+shouldbeofdimension(sample,timesteps,features). Tohelptraining,itisalsoagoodidea
+tonormalizetheinputto0to1. Henceyouhavethefollowing:
+Listing 28.4: Converting the dataset into PyTorch tensors
+import torch
+import torch.nn as nn
+import torch.optim as optim
+# reshape X to be [samples, time steps, features]
+X = torch.tensor(dataX, dtype = torch.float32).reshape(n_patterns, seq_length, 1)
+X = X / float(n_vocab)
+y = torch.tensor(dataY)
+print(X.shape, y .shape)
+YoucannowdefineyourLSTMmodel. Here,youdefineasinglehiddenLSTMlayerwith
+256hiddenunits. Theinputissinglefeature(i.e.,oneintegerforonecharacter). Adropout
+layer with probability 0.2 is added after the LSTM layer. The output of LSTM layer is a
+tuple,whichthefirstelementisthehiddenstatesfromtheLSTMcellforeachofthetime
+step. ItisahistoryofhowthehiddenstateevolvedastheLSTMcellacceptseachtimestep
+ofinput. Presumably,thelasthiddenstatecontainedthemostinformation,henceonlythe
+=== PAGE 16 ===
+28.3 A Small LSTM Network to Predict the Next Character 291
+lasthiddenstateispassontotheoutputlayer. Theoutputlayerisafully-connectedlayer
+toproducelogitsforthe44vocabularies. Thelogitscanbeconvertedintoprobability-like
+predictionusingasoftmaxfunction.
+Listing 28.5: LSTM model for character prediction
+import torch.nn as nn
+class CharModel(nn.Module):
+def __init__(self):
+super().__init__()
+self.lstm = nn.LSTM(input_size=1 , hidden_size =256 , num_layers =1 , batch_first = True)
+self.dropout = nn.Dropout(0.2)
+self.linear = nn.Linear(256, n_vocab)
+def forward(self, x):
+x, _ = self.lstm(x)
+# take only the last output
+x = x[:, -1, :]
+# produce output
+x = self.linear(self.dropout(x))
+return x
+Thisisamodelforsinglecharacterclassificationof44classes. Thereforecross-entropyloss
+shouldbeused. ItisoptimizedusingAdamoptimizer. Thetrainingloopisasfollows. For
+simplicity,notestsethascreated,butthemodelisevaluatedwiththetrainingsetonceagain
+attheendofeachepochtokeeptrackontheprogress.
+Thisprogramcanrunforalongtime,especiallyonCPU!Inordertopreservethefruit
+ofwork,thebestmodeleverfoundissavedforfuturereuse.
+n_epochs = 40
+batch_size = 128
+model = CharModel()
+optimizer = optim.Adam(model.parameters())
+loss_fn = nn.CrossEntropyLoss(reduction= "sum")
+loader = data.DataLoader(data.TensorDataset(X, y), shuffle = True, batch_size = batch_size)
+best_model = None
+best_loss = np.inf
+for epoch in range(n_epochs):
+model.train()
+for X_batch, y_batch in loader:
+y_pred = model(X_batch)
+loss = loss_fn(y_pred, y_batch)
+optimizer.zero_grad()
+loss.backward()
+optimizer.step()
+# Validation
+model.eval()
+loss = 0
+with torch.no_grad():
+for X_batch, y_batch in loader:
+=== PAGE 17 ===
+28.3 A Small LSTM Network to Predict the Next Character 292
+Listing 28.6: Training loop for the LSTM network
+y_pred = model(X_batch)
+loss += loss_fn(y_pred, y_batch)
+if loss < best_loss:
+best_loss = loss
+best_model = model.state_dict()
+print("Epoch %d: Cross-entropy: %.4f" % (epoch, loss))
+torch.save([best_model, char_to_dict], "single-char.pth")
+Runningtheabovemayproducethefollowing:
+Output 28.5: Training progress on the LSTM network
+...
+Epoch 35: Cross-entropy: 245745.2500
+Epoch 36: Cross-entropy: 243908.7031
+Epoch 37: Cross-entropy: 238833.5000
+Epoch 38: Cross-entropy: 239069.0000
+Epoch 39: Cross-entropy: 234176.2812
+Thecross-entropyalmostalwaysdecreasingineachepoch. Thismeansprobablythemodelis
+notfullyconvergedandyoucantrainitformoreepochs. Uponthetrainingloopcompleted,
+youshouldhavethefile single-char.pthcreatedtocontainthebestmodelweighteverfound,
+aswellasthecharacter-to-integermappingusedbythismodel.
+Forcompleteness,belowistyingeverythingaboveintoonescript:
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import torch.utils.data as data
+# load ascii text and covert to lowercase
+filename = "wonderland.txt"
+raw_text = open(filename, 'r', encoding = 'utf-8').read()
+raw_text = raw_text.lower()
+# create mapping of unique chars to integers
+chars = sorted(list(set(raw_text)))
+char_to_int = dict((c, i) for i, c in enumerate(chars))
+# summarize the loaded data
+n_chars = len(raw_text)
+n_vocab = len(chars)
+print("Total Characters: " , n_chars)
+print("Total Vocab: " , n_vocab)
+# prepare the dataset of input to output pairs encoded as integers
+seq_length = 100
+dataX = []
+dataY = []
+=== PAGE 18 ===
+28.3 A Small LSTM Network to Predict the Next Character 293
+for i in range(0, n_chars - seq_length, 1):
+seq_in = raw_text[i:i + seq_length]
+seq_out = raw_text[i + seq_length]
+dataX.append([char_to_int[char] for char in seq_in])
+dataY.append(char_to_int[seq_out])
+n_patterns = len(dataX)
+print("Total Patterns: " , n_patterns)
+# reshape X to be [samples, time steps, features]
+X = torch.tensor(dataX, dtype = torch.float32).reshape(n_patterns, seq_length, 1)
+X = X / float(n_vocab)
+y = torch.tensor(dataY)
+class CharModel(nn.Module):
+def __init__(self):
+super().__init__()
+self.lstm = nn.LSTM(input_size=1 , hidden_size =256 , num_layers =1 , batch_first = True)
+self.dropout = nn.Dropout(0.2)
+self.linear = nn.Linear(256, n_vocab)
+def forward(self, x):
+x, _ = self.lstm(x)
+# take only the last output
+x = x[:, -1, :]
+# produce output
+x = self.linear(self.dropout(x))
+return x
+n_epochs = 40
+batch_size = 128
+model = CharModel()
+optimizer = optim.Adam(model.parameters())
+loss_fn = nn.CrossEntropyLoss(reduction= "sum")
+loader = data.DataLoader(data.TensorDataset(X, y), shuffle = True, batch_size = batch_size)
+best_model = None
+best_loss = np.inf
+for epoch in range(n_epochs):
+model.train()
+for X_batch, y_batch in loader:
+y_pred = model(X_batch)
+loss = loss_fn(y_pred, y_batch)
+optimizer.zero_grad()
+loss.backward()
+optimizer.step()
+# Validation
+model.eval()
+loss = 0
+with torch.no_grad():
+for X_batch, y_batch in loader:
+y_pred = model(X_batch)
+loss += loss_fn(y_pred, y_batch)
+if loss < best_loss:
+best_loss = loss
+=== PAGE 19 ===
+28.4 Generating Text with an LSTM Model 294
+Listing 28.7: Complete program to train a LSTM network for character prediction
+best_model = model.state_dict()
+print("Epoch %d: Cross-entropy: %.4f" % (epoch, loss))
+torch.save([best_model, char_to_int], "single-char.pth")
+28.4 Generating Text with an LSTM Model
+Giventhemodeliswell-trained,generatingtextusingthetrainedLSTMnetworkisrelatively
+straightforward. Firstly,youneedtorecreatethenetworkandloadthetrainedmodelweight
+fromthesavedcheckpoint. Thenyouneedtocreatesomepromptforthemodeltostarton.
+Thepromptcanbeanythingthatthemodelcanunderstand. Itisaseedsequencetobegiven
+tothemodeltoobtainonegeneratedcharacter. Then,thegeneratedcharacterisaddedto
+theendofthissequence,andtrimoffthefirstcharactertomaintaintheconsistentlength.
+Thisprocessisrepeatedforaslongasyouwanttopredictnewcharacters(e.g.,asequence
+of1,000charactersinlength). Youcanpickarandominputpatternasyourseedsequence,
+thenprintgeneratedcharactersasyougeneratethem.
+Asimplewaytogeneratepromptistopickarandomsamplefromtheoriginaldataset,
+e.g.,withthe raw_textobtainedintheprevioussection,apromptcanbecreatedas:
+Listing 28.8: Sample a random prompt from the text
+seq_length = 100
+start = np.random.randint(0, len(raw_text)-seq_length)
+prompt = raw_text[start:start+seq_length]
+Butyoushouldberemindedthatyouneedtotransformitsincethispromptisastringwhile
+themodelexpectsavectorofintegers.
+Theentirecodeismerelyasfollows:
+import numpy as np
+import torch
+import torch.nn as nn
+best_model, char_to_int = torch.load("single-char.pth")
+n_vocab = len(char_to_int)
+int_to_char = dict((i, c) for c, i in char_to_int.items())
+# reload the model
+class CharModel(nn.Module):
+def __init__(self):
+super().__init__()
+self.lstm = nn.LSTM(input_size=1 , hidden_size =256 , num_layers =1 , batch_first = True)
+self.dropout = nn.Dropout(0.2)
+self.linear = nn.Linear(256, n_vocab)
+def forward(self, x):
+x, _ = self.lstm(x)
+# take only the last output
+=== PAGE 20 ===
+28.4 Generating Text with an LSTM Model 295
+Listing 28.9: Loading the trained model and generate text from a random prompt
+x = x[:, -1, :]
+# produce output
+x = self.linear(self.dropout(x))
+return x
+model = CharModel()
+model.load_state_dict(best_model)
+# randomly generate a prompt
+filename = "wonderland.txt"
+seq_length = 100
+raw_text = open(filename, 'r', encoding = 'utf-8').read()
+raw_text = raw_text.lower()
+start = np.random.randint(0, len(raw_text)-seq_length)
+prompt = raw_text[start:start+seq_length]
+pattern = [char_to_int[c] for c in prompt]
+model.eval()
+print('Prompt: " %s"' % prompt)
+with torch.no_grad():
+for i in range(1000):
+# format input array of int into PyTorch tensor
+x = np.reshape(pattern, ( 1, len(pattern), 1)) / float(n_vocab)
+x = torch.tensor(x, dtype = torch.float32)
+# generate logits as output from the model
+prediction = model(x)
+# convert logits into one character
+index = int(prediction.argmax())
+result = int_to_char[index]
+print(result, end = "")
+# append the new character into the prompt for the next iteration
+pattern.append(index)
+pattern = pattern[1:]
+print()
+print("Done.")
+Runningthisexamplefirstoutputsthepromptused,theneachcharacterasitisgenerated.
+Forexample,belowaretheresultsfromonerunofthistextgenerator. Thepromptwas:
+Output 28.6: The prompt
+Prompt: "nother rush at the stick, and tumbled head
+over heels in its hurry to get hold of it; then alice, th"
+Thegeneratedtextwas:
+e was qot a litule soteet of thet was sh the thiee harden an the courd, and was tuitk
+a little toaee th thite ththe and said to the suher, and the whrtght the pacbit
+sese tha woode of the soeee, and the white rabbit ses ani thr gort to the thite
+rabbit, and then she was aoiinnene th the three baaed of the sueen and saed “ota
+turpe ”hun mot,”
+❈❈ ❈❈ ❈❈ ❈❈
+=== PAGE 21 ===
+28.5 Using a Larger LSTM Network 296
+Output 28.7: The generated text
+“i don’t know the ter ano _enend to mere,” said the maccht ar a sore of great roaee.
+“ie you don’t teink if thet soued to soeed to the boeie the mooer, io you bane
+thing it wo
+❈❈ ❈❈
+tou het bn the crur,
+“h whsh you cen not,” said the manch hare.
+“wes, it aadi,” said the manch hare.
+“weat you tail to merer ae in an a gens if gre” ”he were thing,” said the maccht ar a
+sore of geeaghen asd tothe to the thieg harden an the could.
+❈❈
+“h dan tor toe taie thing,” said the manch hare.
+“wes, it aadi,” said the manch hare.
+“weat you tail to merer ae in an a gens if gre” ”he were thing,” said the maccht ar a
+sore of geeaghen asd tothe to the thieg harden an t
+❈❈
+Let’snotesomeobservationsaboutthegeneratedtext.
+⊲ Itcanemitlinebreaks. Theoriginaltextlimitedthelinewidthto80charactersand
+thegenerativemodelattemptedtoreplicatethispattern
+⊲ Thecharactersareseparatedintoword-likegroups,andsomegroupsareactualEnglish
+words(e.g., “the,” “said,” and“rabbit”), butmanyarenot(e.g., “thite,” “soteet,”
+and“tha”).
+⊲ Someofthewordsinsequencemakesense(e.g.,“idon’tknowthe“),butmanydo
+not(e.g.,“hewerething“).
+The fact that this character-based model of the book produces output like this is very
+impressive. It gives you a sense of the learning capabilities of LSTM networks. However,
+the results are not perfect. In the next section, you will look at improving the quality of
+resultsbydevelopingamuchlargerLSTMnetwork.
+28.5 Using a Larger LSTM Network
+RecallthatLSTMisarecurrentneuralnetwork. Ittakesasequenceasinput,whichineach
+stepofthesequence,theinputismixedwithitsinternalstatestoproduceanoutput. Hence
+theoutputfromLSTMisalsoasequence. Intheabove,theoutputfromthelasttimestepis
+takenforfurtherprocessingintheneuralnetworkbutthosefromearlierstepsarediscarded.
+However,itisnotnecessarilythecase. YoucantreatthesequenceoutputfromoneLSTM
+layerasinputtoanotherLSTMlayer. Then,youarebuildingalargernetwork.
+Similartoconvolutionalneuralnetworks,astackedLSTMnetworkissupposedtohave
+theearlierLSTMlayerstolearnlowlevelfeatureswhilethelaterLSTMlayerstolearnthe
+highlevelfeatures. Itmaynotbealwaysusefulbutyoucantryitouttoseewhetherthe
+modelcanproduceabetterresult.
+InPyTorch,makingastackedLSTMlayeriseasy. Let’smodifytheabovemodelinto
+thefollowing:
+=== PAGE 22 ===
+28.5 Using a Larger LSTM Network 297
+Listing 28.10: A LSTM network with two LSTM layers
+import torch.nn as nn
+class CharModel(nn.Module):
+def __init__(self):
+super().__init__()
+self.lstm = nn.LSTM(input_size=1 , hidden_size =256 , num_layers =2 ,
+batch_first= True, dropout =0.2 )
+self.dropout = nn.Dropout(0.2)
+self.linear = nn.Linear(256, n_vocab)
+def forward(self, x):
+x, _ = self.lstm(x)
+# take only the last output
+x = x[:, -1, :]
+# produce output
+x = self.linear(self.dropout(x))
+return x
+Theonlychangeisontheparameterto nn.LSTM(): youset num_layers=2 insteadof1toadd
+another LSTM layer. But between the two LSTM layers, you also added a dropout layer
+throughtheparameter dropout=0.2. Replacingthismodelwiththepreviousisallthechange
+youneedtomake. Rerunthetrainingyoushouldseethebelow:
+Output 28.8: Training progress of a larger LSTM network
+...
+Epoch 34: Cross-entropy: 203763.0312
+Epoch 35: Cross-entropy: 204002.5938
+Epoch 36: Cross-entropy: 210636.5625
+Epoch 37: Cross-entropy: 199619.6875
+Epoch 38: Cross-entropy: 199240.2969
+Epoch 39: Cross-entropy: 196966.1250
+Youshouldseethecross-entropyhereislowerthanthatintheprevioussection. Thismeans
+thismodelisperformingbetter. Infact,withthismodel,youcanseethegeneratedtextlooks
+moresensible:
+Prompt: "ll
+say that ‘i see what i eat’ is the same thing as ‘i eat what i see’!”
+“you might just as well sa"
+y it to sea,” she katter said to the jury. and the thoee hardeners vhine she was
+seady to alice the was a long tay of the sooe of the court, and she was seady to
+and taid to the coor and the court.
+❈❈ ❈❈
+“well you see what you see, the mookee of the soog of the season of the shase of the
+court!”
+❈❈
+“i don’t know the rame thing is it?” said the caterpillar.
+“the cormous was it makes he it was it taie the reason of the shall bbout it, you know.”
+=== PAGE 23 ===
+28.5 Using a Larger LSTM Network 298
+Output 28.9: Generated text from a larger LSTM network
+“i don’t know the rame thing i can’t gelp the sea,” the hatter went on, “i don’t know
+the peally was in the shall sereat it would be a teally.
+❈❈
+the mookee of the court ”
+“i don’t know the rame thing is it?” said the caterpillar.
+“the cormous was it makes he it was it taie the reason of the shall bbout it, you know.”
+“i don’t know the rame thing i can’t gelp the sea,” the hatter went on, “i don’t know
+the peally was in the shall sereat it would be a teally.
+❈❈
+the mookee of the court ”
+“i don’t know the rame thing is it?” said the caterpillar.
+“the
+Done.
+Notonlywordsarespelledcorrectly,thetextisalsomoreEnglish-like. Sincethecross-entropy
+lossisstilldecreasingasyoutrainedthemodel,youcanassumethemodelisnotconverged
+yet. Youcanexpecttomakethemodelbetterifyouincreasedthetrainingepoch.
+Forcompleteness,belowisthecompletecodeforusingthisnewmodel,includingtraining
+andtextgeneration.
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import torch.utils.data as data
+# load ascii text and covert to lowercase
+filename = "wonderland.txt"
+raw_text = open(filename, 'r', encoding = 'utf-8').read()
+raw_text = raw_text.lower()
+# create mapping of unique chars to integers
+chars = sorted(list(set(raw_text)))
+char_to_int = dict((c, i) for i, c in enumerate(chars))
+# summarize the loaded data
+n_chars = len(raw_text)
+n_vocab = len(chars)
+print("Total Characters: " , n_chars)
+print("Total Vocab: " , n_vocab)
+# prepare the dataset of input to output pairs encoded as integers
+seq_length = 100
+dataX = []
+dataY = []
+for i in range(0, n_chars - seq_length, 1):
+seq_in = raw_text[i:i + seq_length]
+seq_out = raw_text[i + seq_length]
+=== PAGE 24 ===
+28.5 Using a Larger LSTM Network 299
+dataX.append([char_to_int[char] for char in seq_in])
+dataY.append(char_to_int[seq_out])
+n_patterns = len(dataX)
+print("Total Patterns: " , n_patterns)
+# reshape X to be [samples, time steps, features]
+X = torch.tensor(dataX, dtype = torch.float32).reshape(n_patterns, seq_length, 1)
+X = X / float(n_vocab)
+y = torch.tensor(dataY)
+class CharModel(nn.Module):
+def __init__(self):
+super().__init__()
+self.lstm = nn.LSTM(input_size=1 , hidden_size =256 , num_layers =2 ,
+batch_first= True, dropout =0.2 )
+self.dropout = nn.Dropout(0.2)
+self.linear = nn.Linear(256, n_vocab)
+def forward(self, x):
+x, _ = self.lstm(x)
+# take only the last output
+x = x[:, -1, :]
+# produce output
+x = self.linear(self.dropout(x))
+return x
+n_epochs = 40
+batch_size = 128
+model = CharModel()
+optimizer = optim.Adam(model.parameters())
+loss_fn = nn.CrossEntropyLoss(reduction= "sum")
+loader = data.DataLoader(data.TensorDataset(X, y), shuffle = True, batch_size = batch_size)
+best_model = None
+best_loss = np.inf
+for epoch in range(n_epochs):
+model.train()
+for X_batch, y_batch in loader:
+y_pred = model(X_batch)
+loss = loss_fn(y_pred, y_batch)
+optimizer.zero_grad()
+loss.backward()
+optimizer.step()
+# Validation
+model.eval()
+loss = 0
+with torch.no_grad():
+for X_batch, y_batch in loader:
+y_pred = model(X_batch)
+loss += loss_fn(y_pred, y_batch)
+if loss < best_loss:
+best_loss = loss
+best_model = model.state_dict()
+print("Epoch %d: Cross-entropy: %.4f" % (epoch, loss))
+=== PAGE 25 ===
+28.6 Faster Training with GPU 300
+Listing 28.11: Complete code of training and using a larger LSTM network
+torch.save([best_model, char_to_int], "single-char.pth")
+# Generation using the trained model
+best_model, char_to_int = torch.load("single-char.pth")
+n_vocab = len(char_to_int)
+int_to_char = dict((i, c) for c, i in char_to_int.items())
+model.load_state_dict(best_model)
+# randomly generate a prompt
+filename = "wonderland.txt"
+seq_length = 100
+raw_text = open(filename, 'r', encoding = 'utf-8').read()
+raw_text = raw_text.lower()
+start = np.random.randint(0, len(raw_text)-seq_length)
+prompt = raw_text[start:start+seq_length]
+pattern = [char_to_int[c] for c in prompt]
+model.eval()
+print('Prompt: " %s"' % prompt)
+with torch.no_grad():
+for i in range(1000):
+# format input array of int into PyTorch tensor
+x = np.reshape(pattern, ( 1, len(pattern), 1)) / float(n_vocab)
+x = torch.tensor(x, dtype = torch.float32)
+# generate logits as output from the model
+prediction = model(x)
+# convert logits into one character
+index = int(prediction.argmax())
+result = int_to_char[index]
+print(result, end = "")
+# append the new character into the prompt for the next iteration
+pattern.append(index)
+pattern = pattern[1:]
+print()
+print("Done.")
+28.6 Faster Training with GPU
+Runningprogramsfromthischaptercanbepatheticallyslow. EvenifyouhaveaGPU,you
+will not see immediate improvement. It is because the design of PyTorch, it may not use
+yourGPUautomatically. However,ifyouhaveaCUDA-capableGPU,youcanimprovethe
+performancealotbycarefullymovingtheheavycomputationawayfromyourCPU.
+APyTorchmodelisaprogramoftensorcalculation. ThetensorscanbestoredinGPU
+orinCPU.Operationcanbecarriedoutaslongasalltheoperatorsareinthesamedevice.
+In this particular example, the model weight (i.e., those of the LSTM layers and the fully
+connectedlayer)canbemovedtoGPU.Bydoingso,theinputshouldalsobemovedtothe
+GPUbeforeexecutionandtheoutputwillalsobestoredintheGPUunlessyoumoveitback.
+=== PAGE 26 ===
+28.6 Faster Training with GPU 301
+InPyTorch,youcancheckifyouhaveaCUDA-capableGPUusingthefollowingfunction:
+Listing 28.12: Checking if CUDA is available on your computer
+torch.cuda.is_available()
+ItreturnsabooleantoindicateifyoucanuseGPU,whichinturn,dependsonthehardware
+model you have, whether your OS has the appropriate library installed, and whether your
+PyTorchiscompiledwithcorrespondingGPUsupport. Ifeverythingworksinconcert,you
+cancreateadeviceandassignyourmodeltoit:
+Listing 28.13: Sending a model to the GPU
+device = torch.device("cuda:0")
+model.to(device)
+IfyourmodelisrunningonCUDAdevicebutyourinputtensorisnot,youwillseePyTorch
+complain about that and fail to proceed. To move your tensor to the CUDA device, you
+shouldrunlikethefollowing:
+Listing 28.14: Sending a tensor to GPU and run on a GPU-based model
+y_pred = model(X_batch.to(device))
+Whichthe .to(device)partwilldothemagic. Butrememberthat y_predproducedabovewill
+alsobeontheCUDAdevice. Henceyoushoulddothesamewhenyourunthelossfunction.
+ModifyingtheaboveprogramtomakeitcapabletorunonGPUwillbecomethefollowing:
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import torch.utils.data as data
+# load ascii text and covert to lowercase
+filename = "wonderland.txt"
+raw_text = open(filename, 'r', encoding = 'utf-8').read()
+raw_text = raw_text.lower()
+# create mapping of unique chars to integers
+chars = sorted(list(set(raw_text)))
+char_to_int = dict((c, i) for i, c in enumerate(chars))
+# summarize the loaded data
+n_chars = len(raw_text)
+n_vocab = len(chars)
+print("Total Characters: " , n_chars)
+print("Total Vocab: " , n_vocab)
+# prepare the dataset of input to output pairs encoded as integers
+seq_length = 100
+dataX = []
+dataY = []
+=== PAGE 27 ===
+28.6 Faster Training with GPU 302
+for i in range(0, n_chars - seq_length, 1):
+seq_in = raw_text[i:i + seq_length]
+seq_out = raw_text[i + seq_length]
+dataX.append([char_to_int[char] for char in seq_in])
+dataY.append(char_to_int[seq_out])
+n_patterns = len(dataX)
+print("Total Patterns: " , n_patterns)
+# reshape X to be [samples, time steps, features]
+X = torch.tensor(dataX, dtype = torch.float32).reshape(n_patterns, seq_length, 1)
+X = X / float(n_vocab)
+y = torch.tensor(dataY)
+class CharModel(nn.Module):
+def __init__(self):
+super().__init__()
+self.lstm = nn.LSTM(input_size=1 , hidden_size =256 , num_layers =2 ,
+batch_first= True, dropout =0.2 )
+self.dropout = nn.Dropout(0.2)
+self.linear = nn.Linear(256, n_vocab)
+def forward(self, x):
+x, _ = self.lstm(x)
+# take only the last output
+x = x[:, -1, :]
+# produce output
+x = self.linear(self.dropout(x))
+return x
+n_epochs = 40
+batch_size = 128
+model = CharModel()
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+model.to(device)
+optimizer = optim.Adam(model.parameters())
+loss_fn = nn.CrossEntropyLoss(reduction= "sum")
+loader = data.DataLoader(data.TensorDataset(X, y), shuffle = True, batch_size = batch_size)
+best_model = None
+best_loss = np.inf
+for epoch in range(n_epochs):
+model.train()
+for X_batch, y_batch in loader:
+y_pred = model(X_batch.to(device))
+loss = loss_fn(y_pred, y_batch .to(device))
+optimizer.zero_grad()
+loss.backward()
+optimizer.step()
+# Validation
+model.eval()
+loss = 0
+with torch.no_grad():
+for X_batch, y_batch in loader:
+y_pred = model(X_batch.to(device))
+=== PAGE 28 ===
+28.6 Faster Training with GPU 303
+Listing 28.15: Training and running a LSTM network on GPU if available
+loss += loss_fn(y_pred, y_batch .to(device))
+if loss < best_loss:
+best_loss = loss
+best_model = model.state_dict()
+print("Epoch %d: Cross-entropy: %.4f" % (epoch, loss))
+torch.save([best_model, char_to_int], "single-char.pth")
+# Generation using the trained model
+best_model, char_to_int = torch.load("single-char.pth")
+n_vocab = len(char_to_int)
+int_to_char = dict((i, c) for c, i in char_to_int.items())
+model.load_state_dict(best_model)
+# randomly generate a prompt
+filename = "wonderland.txt"
+seq_length = 100
+raw_text = open(filename, 'r', encoding = 'utf-8').read()
+raw_text = raw_text.lower()
+start = np.random.randint(0, len(raw_text)-seq_length)
+prompt = raw_text[start:start+seq_length]
+pattern = [char_to_int[c] for c in prompt]
+model.eval()
+print('Prompt: " %s"' % prompt)
+with torch.no_grad():
+for i in range(1000):
+# format input array of int into PyTorch tensor
+x = np.reshape(pattern, ( 1, len(pattern), 1)) / float(n_vocab)
+x = torch.tensor(x, dtype = torch.float32)
+# generate logits as output from the model
+prediction = model(x.to(device))
+# convert logits into one character
+index = int(prediction.argmax())
+result = int_to_char[index]
+print(result, end = "")
+# append the new character into the prompt for the next iteration
+pattern.append(index)
+pattern = pattern[1:]
+print()
+print("Done.")
+Comparetothecodeintheprevioussection,youshouldseetheyareessentiallythesame.
+ExcepttheCUDAdeviceisdetectedwiththeline:
+Listing 28.16: Selecting the GPU if available and fallback to CPU otherwise
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+which will be your GPU or fall back to CPU if no CUDA device is found. Afterward,
+.to(device)isaddedatseveralstrategiclocationstomovethecomputationtotheGPU.
+=== PAGE 29 ===
+28.7 Further Readings 304
+28.7 Further Readings
+Thischaractertextmodelisapopularwayofgeneratingtextusingrecurrentneuralnetworks.
+Belowaresomemoreresourcesandtutorialsonthetopicifyouareinterestedingoingdeeper.
+Articles
+AndrejKarpathy. The Unreasonable Effectiveness of Recurrent Neural Networks .May2015.
+http://karpathy.github.io/2015/05/21/rnn-effectiveness/
+LarsEidnes. Auto-Generating Clickbait With Recurrent Neural Networks .2015.
+https : / / larseidnes . com / 2015 / 10 / 13 / auto - generating - clickbait - with - recurrent -
+neural-networks/
+LSTM.PyTorchAPI.
+https://pytorch.org/docs/stable/generated/torch.nn.LSTM.html
+Sequence Models and Long Short-Term Memory Networks .PyTorchtutorials.
+https://pytorch.org/tutorials/beginner/nlp/sequence_models_tutorial.html
+Papers
+IlyaSutskever,JamesMartens,andGeoffreyHinton.“GeneratingTextwithRecurrentNeural
+Networks”.In: Proceedings of the 28th International Conference on Machine Learning .
+Bellevue,WA,USA,2011.
+https://www.cs.utoronto.ca/~ilya/pubs/2011/LANG-RNN.pdf
+28.8 Summary
+Inthischapter,youdiscoveredhowyoucandevelopanLSTMrecurrentneuralnetworkfor
+textgenerationinPyTorch. Aftercompletingthischapter,youknow:
+⊲ Howtofindtextforclassicalbooksforfreeasdatasetforyourmachinelearningmodel
+⊲ HowtotrainanLSTMnetworkfortextsequences
+⊲ HowtouseaLSTMnetworktogeneratetextsequencesHowtooptimizedeeplearning
+traininginPyTorchusingCUDAdevices
+Thismarkstheendofthisbook.
