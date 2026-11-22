@@ -12,7 +12,7 @@ Nhằm đảm bảo tính minh bạch, ghi nhận đúng tiến trình làm vi�
 
 ### **3. Quy cách và hình thức nộp bài**
 - Nơi nộp bài: Sinh viên bắt buộc nộp bài trực tuyến thông qua classroom. Tuyệt đối không nhận bài qua email hoặc bất kỳ hình thức nào khác.
-- Định dạng file nộp: Nộp 01 file PDF duy nhất với tên (M01 - BatchGD_Regression_HoTen_MaSV.pdf/M02_Mock_MLP_HoTen_MaSV.pdf). Trang đầu tiên của file PDF bắt buộc trình bày đầy đủ các thông tin sau:
+- Định dạng file nộp: Nộp 01 file PDF duy nhất với tên (M01 - BatchGD_Regression_HoTen_MaSV.pdf/M02_Mock_MLP_HoTen_MaSV.pdf/M03 - SGD_MLP_RNN_HoTen_MaSV.pdf). Trang đầu tiên của file PDF bắt buộc trình bày đầy đủ các thông tin sau:
 	- Tên học phần (Môn học): [...]
 	- Lớp môn học: [...]
 	- Họ và tên sinh viên: [...]
