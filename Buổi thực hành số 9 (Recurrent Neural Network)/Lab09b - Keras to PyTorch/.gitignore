@@ -1,0 +1,3 @@
+# Bỏ qua các file dữ liệu quá lớn
+# Nằm trong thư mục 5. Others
+*.zip 
