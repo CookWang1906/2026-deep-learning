@@ -1,3 +1,14 @@
-# Bỏ qua folder dữ liệu
+# Dữ liệu quá lớn, không đẩy lên Git
 data/
 
+# Log và checkpoint của các lần chạy
+logs/
+checkpoints/
+exps/checkpoints/
+
+# Python / Jupyter
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.venv/
+venv/

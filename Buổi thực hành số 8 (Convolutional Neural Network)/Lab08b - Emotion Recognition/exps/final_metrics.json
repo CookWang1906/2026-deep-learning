@@ -1,0 +1,7 @@
+{
+  "checkpoint": "medium_20261124_180836_best.pt",
+  "checkpoint_epoch": 2,
+  "test_size": 3589,
+  "accuracy": 0.1947617720813597,
+  "macro_f1": 0.09242212787116219
+}
