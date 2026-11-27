@@ -1,12 +1,20 @@
 # **YÊU CẦU CỦA GIẢNG VIÊN**
 
 ## **Lab09a - RNN Models**
+
 - Tải về các bộ dữ liệu cần thiết cho bài tập. (Toàn bộ có trong data/)
 - Thực hành các bài tập có trong file hướng dẫn PDF.
 
 ## **Lab09b - Keras to PyTorch**
+
 - Thực hành chuyển biến Keras sang PyTorch.
 - Đọc PDF để hiểu về lý thuyết và xem các thư mục để hiểu cách thực thi.
+
+## **DL26 - RNN Assignment**
+
+- Làm bài tập trong file đính kèm.
+- Trình bày trong file word, có ghi rõ trang bìa, họ tên sinh viên.
+- Tên file: BT06_RNN_HoTen_MaSV.docx
 
 ## **Tài liệu được tham khảo**
 - [PDF: DL26 - A - Recurrent Neural Networks (Eng)](https://github.com/CookWang1906/Basic_deep_learning/blob/721f1b2559c944c11a7a5f387e8731b4f7ab1ac3/Bu%E1%BB%95i%20th%E1%BB%B1c%20h%C3%A0nh%20s%E1%BB%91%209%20(Recurrent%20Neural%20Network)/DL26%20-%20A%20-%20Recurrent%20Neural%20Networks%20(Eng).pdf)
